@@ -61,15 +61,24 @@ func (env *Env) BeginTxn(parent *Txn, flags uint) (*Txn, error) {
 }
 
 func (txn *Txn) Commit() error {
+	if txn._txn == nil {
+		return nil // already committed/aborted
+	}
 	ret := C.mdb_txn_commit(txn._txn)
 	runtime.UnlockOSThread()
-	return errno(ret)
+	if ret != SUCCESS {
+		return errno(ret)
+	}
+	txn._txn = nil
+	return nil
 }
 
 func (txn *Txn) Abort() {
-	C.mdb_txn_abort(txn._txn)
-	runtime.UnlockOSThread()
-	txn._txn = nil
+	if txn._txn != nil {
+		C.mdb_txn_abort(txn._txn)
+		runtime.UnlockOSThread()
+		txn._txn = nil
+	}
 }
 
 func (txn *Txn) Reset() {
