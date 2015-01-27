@@ -11,6 +11,7 @@ package mdb
 import "C"
 
 import (
+	"reflect"
 	"unsafe"
 )
 
@@ -33,6 +34,12 @@ func Wrap(p []byte) Val {
 // If val is nil, a empty slice is retured.
 func (val Val) Bytes() []byte {
 	return C.GoBytes(val.mv_data, C.int(val.mv_size))
+}
+
+// Returns pointer to mmapped memory, managed by LMDB.  Invalid after transaction closes, access will segfault.  If val is nil, this will segfault
+func (val Val) RawBytes() []byte {
+	h := reflect.SliceHeader{uintptr(val.mv_data), int(val.mv_size), int(val.mv_size)}
+	return *(*[]byte)(unsafe.Pointer(&h))
 }
 
 // If val is nil, an empty string is returned.
