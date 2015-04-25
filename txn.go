@@ -38,10 +38,20 @@ const (
 // All database operations require a transaction handle.
 // Transactions may be read-only or read-write.
 type Txn struct {
-	_txn *C.MDB_txn
+	_txn       *C.MDB_txn
+	pinThreads bool
 }
 
 func (env *Env) BeginTxn(parent *Txn, flags uint) (*Txn, error) {
+	return env.BeginTxnR(parent, flags, true)
+}
+
+// pinThreads parameter for whether manage LockOsThread now and release on
+// restruction of this txn.  Set it true unless you've already called LockOsThread for
+// the current goroutine, and absolutely know what you're doing.
+// LMDB uses threadlocal state for Txns and will have lots of
+// errors and possibly deadlocks if you don't call LockOSThread properly.
+func (env *Env) BeginTxnR(parent *Txn, flags uint, pinThreads bool) (*Txn, error) {
 	var _txn *C.MDB_txn
 	var ptxn *C.MDB_txn
 	if parent == nil {
@@ -49,15 +59,17 @@ func (env *Env) BeginTxn(parent *Txn, flags uint) (*Txn, error) {
 	} else {
 		ptxn = parent._txn
 	}
-	if flags&RDONLY == 0 {
+	if flags&RDONLY == 0 && pinThreads {
 		runtime.LockOSThread()
 	}
 	ret := C.mdb_txn_begin(env._env, ptxn, C.uint(flags), &_txn)
 	if ret != SUCCESS {
-		runtime.UnlockOSThread()
+		if pinThreads {
+			runtime.UnlockOSThread()
+		}
 		return nil, errno(ret)
 	}
-	return &Txn{_txn}, nil
+	return &Txn{_txn, pinThreads}, nil
 }
 
 func (txn *Txn) Commit() error {
@@ -65,7 +77,9 @@ func (txn *Txn) Commit() error {
 		return nil // already committed/aborted
 	}
 	ret := C.mdb_txn_commit(txn._txn)
-	runtime.UnlockOSThread()
+	if txn.pinThreads {
+		runtime.UnlockOSThread()
+	}
 	if ret != SUCCESS {
 		return errno(ret)
 	}
